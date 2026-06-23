@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { pathToFileURL } from 'url';
 import { defaultChromeExecutable } from '../src/providers/zaiBrowser.js';
 
 const outPath = process.argv[2] || process.env.AUTH_PATH || './auth.json';
@@ -55,9 +56,11 @@ export function isUsableZaiAuthToken(token, { allowGuest = false } = {}) {
 }
 
 async function readToken(page) {
-  return page.evaluate(() => {
-    try { return localStorage.getItem('token') || ''; } catch { return ''; }
-  });
+  try {
+    return await page.evaluate(() => {
+      try { return localStorage.getItem('token') || ''; } catch { return ''; }
+    });
+  } catch { return ''; }
 }
 
 async function cookieHeader(page) {
@@ -117,6 +120,6 @@ async function main() {
   process.exit(2);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(err => { console.error(err); process.exit(1); });
 }
