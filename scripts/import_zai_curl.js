@@ -1,8 +1,10 @@
 import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import crypto from 'crypto';
 
 const inputPath = process.argv[2] || '';
-const outPath = process.argv[3] || `/tmp/freeglm-auth-${crypto.randomUUID()}.json`;
+const outPath = process.argv[3] || path.join(os.tmpdir(), `freeglm-auth-${crypto.randomUUID()}.json`);
 const curl = inputPath ? fs.readFileSync(inputPath, 'utf8') : fs.readFileSync(0, 'utf8');
 
 function unquoteShell(s) {

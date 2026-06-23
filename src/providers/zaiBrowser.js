@@ -33,12 +33,22 @@ export function defaultChromeExecutable() {
   const candidates = [
     process.env.CHROME_PATH,
     process.env.PUPPETEER_EXECUTABLE_PATH,
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium'
+    ...(process.platform === 'win32' ? [
+      `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env.USERPROFILE}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env.LOCALAPPDATA}\\Chromium\\Application\\chrome.exe`,
+      `${process.env.LOCALAPPDATA}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    ] : [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+    ])
   ].filter(Boolean);
   return candidates.find(p => fs.existsSync(p)) || undefined;
 }
@@ -54,7 +64,7 @@ export function cleanChromeProfileLocks(profileDir) {
       if (LOCK_FILES.includes(entry.name) || entry.name === 'LOCK') {
         try {
           fs.rmSync(entryPath, { force: true, recursive: true });
-          removed.push(path.relative(profileDir, entryPath) || entry.name);
+          removed.push((path.relative(profileDir, entryPath) || entry.name).replaceAll('\\', '/'));
         } catch {}
       } else if (entry.isDirectory() && ['Default', 'Profile 1', 'Profile 2'].includes(entry.name)) {
         visit(entryPath, depth + 1);
