@@ -54,7 +54,7 @@ export function cleanChromeProfileLocks(profileDir) {
       if (LOCK_FILES.includes(entry.name) || entry.name === 'LOCK') {
         try {
           fs.rmSync(entryPath, { force: true, recursive: true });
-          removed.push(path.relative(profileDir, entryPath) || entry.name);
+          removed.push(path.relative(profileDir, entryPath).replace(/\\/g, '/') || entry.name);
         } catch {}
       } else if (entry.isDirectory() && ['Default', 'Profile 1', 'Profile 2'].includes(entry.name)) {
         visit(entryPath, depth + 1);
