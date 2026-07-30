@@ -28,6 +28,11 @@ services:
       # KIMI_TOKEN: ""
       # Protect the proxy if you expose it beyond localhost/LAN:
       # API_KEYS: ""
+      # Debugging REASON_CHAT_MESSAGE_NOT_FOUND on Kimi turn 2+ (see .env.example
+      # and src/providers/kimi.js for context). Capture real values with
+      # `npm run kimi:dump-headers` before setting KIMI_EXTRA_HEADERS.
+      # KIMI_EXTRA_HEADERS: '{}'
+      # DEBUG_KIMI: 1
 
     # Optional: keep real tokens out of this file entirely and drop them in a
     # .env next to this compose file instead (same keys as .env.example).
