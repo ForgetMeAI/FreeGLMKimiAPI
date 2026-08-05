@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { preparePrompt } from '../message.js';
 import { getZaiBrowserClient, isZaiCaptchaError, shouldUseZaiBrowserFallback } from './zaiBrowser.js';
+import { isZaiAuthError, getTokenTtlMs } from './zaiTokenRefresh.js';
 
 export const ZAI_BASE = 'https://chat.z.ai';
 export const ZAI_FE_VERSION = process.env.ZAI_FE_VERSION || 'prod-fe-1.1.46';
@@ -135,7 +136,17 @@ export function buildZaiRequest({ token, model='glm-5', prompt='', chatId='', pa
 }
 
 export class ZaiProvider {
-  constructor(account){ this.account=account; this.token=account.token || account.accessToken || account.access_token || account.jwt || account.refresh_token || account.refreshToken; this.cookie = account.cookie || account.cookies || process.env.ZAI_COOKIE || null; this.captchaVerifyParam = account.captcha_verify_param || account.captchaVerifyParam || process.env.ZAI_CAPTCHA_VERIFY_PARAM || null; this.browserFallback = shouldUseZaiBrowserFallback(process.env, account); if(!this.token) throw new Error('Z.ai token missing'); }
+  constructor(account, { tokenRefresher = null, accountManager = null, logger = console } = {}) {
+    this.account = account;
+    this.token = account.token || account.accessToken || account.access_token || account.jwt || account.refresh_token || account.refreshToken;
+    this.cookie = account.cookie || account.cookies || process.env.ZAI_COOKIE || null;
+    this.captchaVerifyParam = account.captcha_verify_param || account.captchaVerifyParam || process.env.ZAI_CAPTCHA_VERIFY_PARAM || null;
+    this.browserFallback = shouldUseZaiBrowserFallback(process.env, account);
+    this.tokenRefresher = tokenRefresher;
+    this.accountManager = accountManager;
+    this.logger = logger;
+    if(!this.token) throw new Error('Z.ai token missing');
+  }
   async createChat(model, prompt) {
     const timestamp = Math.floor(Date.now()/1000);
     const messageId = randomUuid();
@@ -149,35 +160,92 @@ export class ZaiProvider {
     const prompt = preparePrompt(messages, tools, { simpleTools:false, isMultiTurn:!!session.providerSessionId });
     let chatId = session.providerSessionId || '';
     let parentId = session.parentMessageId || null;
-    if (!chatId) {
-      const created = await this.createChat(modelCfg.id, prompt);
-      chatId = created.chatId;
-      parentId = created.messageId;
-    }
-    const req = buildZaiRequest({ token:this.token, model:modelCfg.id, prompt, chatId, parentMessageId:parentId, thinking:modelCfg.thinking, webSearch:modelCfg.webSearch, captchaVerifyParam:this.captchaVerifyParam, cookie:this.cookie });
-    const resp = await fetch(req.url, { method:'POST', headers:req.headers, body:JSON.stringify(req.body) });
-    const raw = await resp.text();
-    if (!resp.ok) {
-      if (this.browserFallback) {
+
+    // ── Attempt with auto-relogin on auth error ──
+    for (let attempt = 0; attempt < 2; attempt++) {
+      // Create chat only once (or retry if it failed with auth error on first attempt)
+      if (!chatId) {
+        try {
+          const created = await this.createChat(modelCfg.id, prompt);
+          chatId = created.chatId;
+          parentId = created.messageId;
+        } catch (err) {
+          if (isZaiAuthError(0, err.message) && this.tokenRefresher && attempt === 0) {
+            this.logger.warn?.(`[zai] createChat auth error — triggering CDP relogin`);
+            const refreshed = await this.tokenRefresher.refresh();
+            if (refreshed?.ok && refreshed?.token) {
+              this.token = refreshed.token;
+              if (refreshed.cookie) this.cookie = refreshed.cookie;
+              if (this.accountManager && this.account?.id) {
+                this.accountManager.updateToken(this.account.id, { token: refreshed.token, cookie: refreshed.cookie });
+              }
+              this.logger.info?.('[zai] token refreshed via CDP — retrying createChat');
+              continue;
+            }
+          }
+          throw err;
+        }
+      }
+      const req = buildZaiRequest({ token:this.token, model:modelCfg.id, prompt, chatId, parentMessageId:parentId, thinking:modelCfg.thinking, webSearch:modelCfg.webSearch, captchaVerifyParam:this.captchaVerifyParam, cookie:this.cookie });
+      const resp = await fetch(req.url, { method:'POST', headers:req.headers, body:JSON.stringify(req.body) });
+      const raw = await resp.text();
+
+      // Auth error detection → auto-relogin via CDP
+      if (!resp.ok && isZaiAuthError(resp.status, raw) && this.tokenRefresher && attempt === 0) {
+        this.logger.warn?.(`[zai] auth error (HTTP ${resp.status}) — triggering CDP relogin`);
+        const refreshed = await this.tokenRefresher.refresh();
+        if (refreshed?.ok && refreshed?.token) {
+          this.token = refreshed.token;
+          if (refreshed.cookie) this.cookie = refreshed.cookie;
+          // Update the account in AccountManager + persist
+          if (this.accountManager && this.account?.id) {
+            this.accountManager.updateToken(this.account.id, { token: refreshed.token, cookie: refreshed.cookie });
+          }
+          this.logger.info?.('[zai] token refreshed via CDP — retrying request');
+          continue; // retry with new token
+        }
+        this.logger.error?.('[zai] CDP relogin failed — falling through to normal error handling');
+      }
+
+      // Browser fallback for non-auth errors (captcha, etc.)
+      if (!resp.ok) {
+        if (this.browserFallback && !isZaiAuthError(resp.status, raw)) {
+          const browser = getZaiBrowserClient();
+          const browserResult = await browser.completeAndParse(req, { token:this.token, chatId });
+          if (!browserResult.ok) throw new Error(`Z.ai browser HTTP ${browserResult.status}: ${browserResult.raw.slice(0,200)}`);
+          const browserParsed = browserResult.parsed;
+          if (browserParsed.error) throw new Error(`Z.ai browser error: ${browserParsed.error}`);
+          return { text: browserParsed.text || browserResult.raw, reasoning: browserParsed.reasoning, providerSessionId: browserParsed.providerSessionId || chatId, parentMessageId: browserParsed.parentMessageId || req.messageId, prompt };
+        }
+        throw new Error(`Z.ai HTTP ${resp.status}: ${raw.slice(0,200)}`);
+      }
+      let parsed = parseZaiSse(raw);
+      if (parsed.error && this.browserFallback && isZaiCaptchaError(parsed.error)) {
         const browser = getZaiBrowserClient();
         const browserResult = await browser.completeAndParse(req, { token:this.token, chatId });
         if (!browserResult.ok) throw new Error(`Z.ai browser HTTP ${browserResult.status}: ${browserResult.raw.slice(0,200)}`);
-        const browserParsed = browserResult.parsed;
-        if (browserParsed.error) throw new Error(`Z.ai browser error: ${browserParsed.error}`);
-        return { text: browserParsed.text || browserResult.raw, reasoning: browserParsed.reasoning, providerSessionId: browserParsed.providerSessionId || chatId, parentMessageId: browserParsed.parentMessageId || req.messageId, prompt };
+        parsed = browserResult.parsed;
+        if (parsed.error) throw new Error(`Z.ai browser error: ${parsed.error}`);
+      } else if (parsed.error) {
+        // Auth error in SSE body → try relogin
+        if (isZaiAuthError(0, parsed.error) && this.tokenRefresher && attempt === 0) {
+          this.logger.warn?.(`[zai] SSE auth error — triggering CDP relogin`);
+          const refreshed = await this.tokenRefresher.refresh();
+          if (refreshed?.ok && refreshed?.token) {
+            this.token = refreshed.token;
+            if (refreshed.cookie) this.cookie = refreshed.cookie;
+            if (this.accountManager && this.account?.id) {
+              this.accountManager.updateToken(this.account.id, { token: refreshed.token, cookie: refreshed.cookie });
+            }
+            this.logger.info?.('[zai] token refreshed via CDP — retrying request');
+            continue;
+          }
+        }
+        throw new Error(`Z.ai error: ${parsed.error}`);
       }
-      throw new Error(`Z.ai HTTP ${resp.status}: ${raw.slice(0,200)}`);
+      return { text: parsed.text || raw, reasoning: parsed.reasoning, providerSessionId: parsed.providerSessionId || chatId, parentMessageId: parsed.parentMessageId || req.messageId, prompt };
     }
-    let parsed = parseZaiSse(raw);
-    if (parsed.error && this.browserFallback && isZaiCaptchaError(parsed.error)) {
-      const browser = getZaiBrowserClient();
-      const browserResult = await browser.completeAndParse(req, { token:this.token, chatId });
-      if (!browserResult.ok) throw new Error(`Z.ai browser HTTP ${browserResult.status}: ${browserResult.raw.slice(0,200)}`);
-      parsed = browserResult.parsed;
-      if (parsed.error) throw new Error(`Z.ai browser error: ${parsed.error}`);
-    } else if (parsed.error) {
-      throw new Error(`Z.ai error: ${parsed.error}`);
-    }
-    return { text: parsed.text || raw, reasoning: parsed.reasoning, providerSessionId: parsed.providerSessionId || chatId, parentMessageId: parsed.parentMessageId || req.messageId, prompt };
+    // Should not reach here — both attempts exhausted
+    throw new Error('Z.ai: both attempts exhausted after relogin');
   }
 }

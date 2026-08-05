@@ -120,6 +120,22 @@ export class AccountManager {
     return a;
   }
 
+  /**
+   * Update an account's token (and optionally cookie) in-place and persist.
+   * Called by the auto-relogin flow after a CDP token refresh.
+   */
+  updateToken(id, { token, cookie } = {}, { persist = truthy(this.env.PERSIST_ADMIN_ACCOUNTS ?? '1') } = {}) {
+    const a = this.get(id);
+    if (!a) return null;
+    if (token) a.token = token;
+    if (cookie) a.cookie = cookie;
+    a.ok = true;
+    a.lastError = '';
+    a.cooldownUntil = 0;
+    if (persist) this.persist();
+    return this._safe(a);
+  }
+
   markSuccess(id) {
     const a = this.get(id);
     if (!a) return;

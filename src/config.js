@@ -11,6 +11,13 @@ export const AUTH_PATH = process.env.AUTH_PATH || path.join(process.cwd(), 'auth
 export const API_KEYS = String(process.env.API_KEYS || '').split(',').map(s => s.trim()).filter(Boolean);
 export const GLM_BACKEND = (process.env.GLM_BACKEND || 'zai').toLowerCase();
 
+// ── Z.ai auto-relogin via CDP ──────────────────────────────────
+export const ZAI_CDP_URL = process.env.ZAI_CDP_URL || ''; // e.g. 'http://127.0.0.1:9222'
+export const ZAI_TOKEN_REFRESH_ENABLED = ['1','true','yes','on'].includes(String(process.env.ZAI_TOKEN_REFRESH_ENABLED || '').toLowerCase()) || !!ZAI_CDP_URL;
+export const ZAI_TOKEN_REFRESH_THRESHOLD_MS = Number(process.env.ZAI_TOKEN_REFRESH_THRESHOLD_MS || 300_000); // 5 min
+export const ZAI_TOKEN_REFRESH_COOLDOWN_MS = Number(process.env.ZAI_TOKEN_REFRESH_COOLDOWN_MS || 30_000);
+export const ZAI_TOKEN_REFRESH_INTERVAL_MS = Number(process.env.ZAI_TOKEN_REFRESH_INTERVAL_MS || 60_000);
+
 export const MODELS = {
   'glm-5': { provider: 'glm', thinking: false, webSearch: false, deepResearch: false },
   'glm-5-thinking': { provider: 'glm', thinking: true, webSearch: false, deepResearch: false },

@@ -1,11 +1,12 @@
 import http from 'http';
 import { pathToFileURL } from 'node:url';
-import { PORT, HOST, MODELS, WATERMARK, MOCK_PROVIDER, AUTH_PATH, GLM_BACKEND, resolveModel, requireProxyAuth } from './config.js';
+import { PORT, HOST, MODELS, WATERMARK, MOCK_PROVIDER, AUTH_PATH, GLM_BACKEND, resolveModel, requireProxyAuth, ZAI_CDP_URL, ZAI_TOKEN_REFRESH_ENABLED, ZAI_TOKEN_REFRESH_THRESHOLD_MS, ZAI_TOKEN_REFRESH_COOLDOWN_MS, ZAI_TOKEN_REFRESH_INTERVAL_MS } from './config.js';
 import { AccountManager } from './accounts.js';
 import { SessionStore } from './sessions.js';
 import { KimiProvider } from './providers/kimi.js';
 import { GLMProvider } from './providers/glm.js';
 import { ZaiProvider } from './providers/zai.js';
+import { ZaiTokenRefresher } from './providers/zaiTokenRefresh.js';
 import { mockComplete } from './mockProvider.js';
 import { parseToolCallsFromText, buildToolCallCompletion, usage } from './tooling.js';
 import { anthropicToOpenAI, openAIToAnthropic } from './anthropic.js';
@@ -13,10 +14,38 @@ import { anthropicToOpenAI, openAIToAnthropic } from './anthropic.js';
 const store=new SessionStore();
 const accountManager=new AccountManager({ authPath: AUTH_PATH, env: process.env, cooldownMs: Number(process.env.ACCOUNT_COOLDOWN_MS || 60_000) });
 
+// ── Z.ai auto-relogin via CDP ──
+let zaiTokenRefresher = null;
+if (ZAI_TOKEN_REFRESH_ENABLED && ZAI_CDP_URL) {
+  zaiTokenRefresher = new ZaiTokenRefresher({
+    cdpUrl: ZAI_CDP_URL,
+    thresholdMs: ZAI_TOKEN_REFRESH_THRESHOLD_MS,
+    cooldownMs: ZAI_TOKEN_REFRESH_COOLDOWN_MS,
+    logger: console,
+  });
+  console.log(`[FreeGLMKimiAPI] Z.ai auto-relogin enabled — CDP: ${ZAI_CDP_URL}, threshold: ${Math.round(ZAI_TOKEN_REFRESH_THRESHOLD_MS/1000)}s, interval: ${Math.round(ZAI_TOKEN_REFRESH_INTERVAL_MS/1000)}s`);
+  // Start proactive refresh check
+  zaiTokenRefresher.startProactiveRefresh(
+    () => accountManager.rawList().filter(a => a.provider === 'glm' && (a.backend || GLM_BACKEND) !== 'chatglm'),
+    async (id, { token, cookie }) => {
+      const updated = accountManager.updateToken(id, { token, cookie });
+      console.log(`[FreeGLMKimiAPI] proactive token refresh for ${id} — ok=${!!updated}`);
+    },
+    ZAI_TOKEN_REFRESH_INTERVAL_MS
+  );
+} else if (ZAI_TOKEN_REFRESH_ENABLED) {
+  console.warn('[FreeGLMKimiAPI] ZAI_TOKEN_REFRESH_ENABLED but no ZAI_CDP_URL set — auto-relogin disabled');
+}
+
 function json(res,status,obj){ const data=JSON.stringify(obj); res.writeHead(status, {'Content-Type':'application/json','Content-Length':Buffer.byteLength(data)}); res.end(data); }
 async function readBody(req){ const chunks=[]; for await (const c of req) chunks.push(c); const raw=Buffer.concat(chunks).toString('utf8'); return raw ? JSON.parse(raw) : {}; }
 function selectAccount(provider, session){ if (MOCK_PROVIDER) return { id:`mock-${provider}`, provider }; return accountManager.select(provider, session); }
-function providerFor(modelCfg, account){ if (modelCfg.provider==='kimi') return new KimiProvider(account); const backend=(account.backend || account.endpoint || GLM_BACKEND).toLowerCase(); return backend==='chatglm' || backend==='chatglm.cn' ? new GLMProvider(account) : new ZaiProvider(account); }
+function providerFor(modelCfg, account){
+  if (modelCfg.provider==='kimi') return new KimiProvider(account);
+  const backend=(account.backend || account.endpoint || GLM_BACKEND).toLowerCase();
+  if (backend==='chatglm' || backend==='chatglm.cn') return new GLMProvider(account);
+  return new ZaiProvider(account, { tokenRefresher: zaiTokenRefresher, accountManager, logger: console });
+}
 function textCompletion(content, model, prompt='', reasoning=''){ const msg={role:'assistant',content}; if(reasoning) msg.reasoning_content=reasoning; return { id:`fgk-${Date.now()}`, object:'chat.completion', created:Math.floor(Date.now()/1000), model, choices:[{index:0,message:msg,finish_reason:'stop'}], usage:usage(prompt,content), watermark:WATERMARK }; }
 function sseChunk(res,obj){ res.write(`data: ${JSON.stringify(obj)}\n\n`); }
 async function doCompletion(body){
@@ -61,6 +90,17 @@ async function handleAdmin(req,res,url){
   if (req.method==='GET' && url.pathname==='/admin/accounts') return json(res,200,{accounts:accountManager.list()});
   if (req.method==='POST' && url.pathname==='/admin/accounts') { const body=await readBody(req); const { persist, ...account }=body; const saved=accountManager.add(account,{persist:persistFrom(url,body)}); return json(res,201,{account:saved,accounts:accountManager.list()}); }
   if (req.method==='POST' && url.pathname==='/admin/accounts/reload') return json(res,200,{accounts:accountManager.reload()});
+  if (req.method==='POST' && url.pathname==='/admin/zai/refresh-token') {
+    if (!zaiTokenRefresher) return json(res,400,{error:{message:'Z.ai auto-relogin not configured — set ZAI_CDP_URL'}});
+    const result = await zaiTokenRefresher.refresh();
+    if (!result?.ok) return json(res,502,{error:{message:'CDP token refresh failed',detail:result?.reason || 'unknown'}});
+    // Auto-update all zai accounts with the fresh token
+    const zaiAccounts = accountManager.rawList().filter(a => a.provider === 'glm' && (a.backend || GLM_BACKEND) !== 'chatglm');
+    for (const acct of zaiAccounts) {
+      accountManager.updateToken(acct.id, { token: result.token, cookie: result.cookie });
+    }
+    return json(res,200,{ok:true, tokenLength: result.token.length, cookieLength: result.cookie?.length || 0, accounts: accountManager.list()});
+  }
   const m=url.pathname.match(/^\/admin\/accounts\/([^/]+)$/);
   if (m && req.method==='DELETE') return json(res,200,{deleted:accountManager.delete(decodeURIComponent(m[1]),{persist:persistFrom(url)})});
   return false;
