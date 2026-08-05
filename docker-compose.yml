@@ -23,6 +23,10 @@ services:
       MOCK_PROVIDER: 0
       PERSIST_ADMIN_ACCOUNTS: 1
       ACCOUNT_COOLDOWN_MS: 60000
+      # How long an idle conversation keeps its provider chat id, and how many
+      # turns one chat id may grow to, before the next turn starts fresh.
+      # SESSION_TTL_MS: 7200000
+      # SESSION_MAX_DEPTH: 100
       # Single-account shortcut (skip if you're using auth.json instead):
       # GLM_TOKEN: ""
       # KIMI_TOKEN: ""
@@ -33,6 +37,19 @@ services:
       # `npm run kimi:dump-headers` before setting KIMI_EXTRA_HEADERS.
       # KIMI_EXTRA_HEADERS: '{}'
       # DEBUG_KIMI: 1
+      # Auto-discover-and-retire model catalog. See docs/model-lifecycle.md.
+      # MODEL_CATALOG_PATH: /app/data/models.json
+      MODEL_RETIRE_AFTER_FAILURES: 3
+      # MODEL_ERROR_PATTERNS_EXTRA: '[]'
+      # Kimi only — unconfirmed guesses for K2.6/K2.7-Code/K3, see
+      # scripts/kimi_dump_curl_headers.js:
+      # KIMI_SCENARIOS: '{}'
+      # Z.ai browser fallback (Puppeteer/CloakBrowser). See docs/browser-fallback.md.
+      ZAI_BROWSER_COMPLETION_TIMEOUT: 180000
+      ZAI_BROWSER_HEARTBEAT_MS: 15000
+      # Close the idle browser after 10 min with zero requests (0 disables):
+      ZAI_BROWSER_IDLE_CLOSE_MS: 600000
+      # ZAI_BROWSER_PUPPETEER_ARGS: ''
 
     # Optional: keep real tokens out of this file entirely and drop them in a
     # .env next to this compose file instead (same keys as .env.example).

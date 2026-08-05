@@ -63,3 +63,22 @@ test('admin accounts API adds lists deletes and reloads accounts without exposin
     assert.ok(Array.isArray(reloaded.json.accounts));
   } finally { await close(); }
 });
+
+test('GET /admin/browser reports Z.ai browser-fallback state without launching real Chromium', async () => {
+  const port = await listen();
+  try {
+    const r = await get(port, '/admin/browser');
+    assert.equal(r.status, 200);
+    assert.equal(r.json.browser.running, false, 'merely checking status must not launch a browser');
+    assert.equal(r.json.browser.openScratchPages, 0);
+  } finally { await close(); }
+});
+
+test('POST /admin/browser/close is a safe no-op when nothing is running', async () => {
+  const port = await listen();
+  try {
+    const r = await post(port, '/admin/browser/close', {});
+    assert.equal(r.status, 200);
+    assert.equal(r.json.closed, true);
+  } finally { await close(); }
+});
