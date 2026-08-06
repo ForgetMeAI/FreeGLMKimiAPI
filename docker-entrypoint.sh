@@ -18,11 +18,21 @@ CURRENT_HASH=$(cat package.json package-lock.json "$SELF" 2>/dev/null | \
 CURRENT_HASH="${CURRENT_HASH}-node$(node --version)-$(uname -m)"
 
 if [ -f "$SENTINEL" ] && [ "$(cat "$SENTINEL")" = "$CURRENT_HASH" ]; then
-    echo "[entrypoint] node_modules matches sentinel — skipping npm ci"
+    echo "[entrypoint] node_modules matches sentinel — skipping npm install"
 else
     echo "[entrypoint] Installing dependencies (first run, or package.json/lock/Node/arch/entrypoint changed)..."
     npm install
     echo "$CURRENT_HASH" > "$SENTINEL"
+fi
+
+# Start VNC if enabled (for manual captcha solving)
+if [ "${ENABLE_VNC}" = "1" ] || [ "${ENABLE_VNC}" = "true" ]; then
+    echo "[entrypoint] Starting VNC server..."
+    /usr/local/bin/start-vnc.sh &
+    VNC_PID=$!
+    # Give VNC a moment to start
+    sleep 3
+    echo "[entrypoint] VNC started (pid: ${VNC_PID})"
 fi
 
 exec "$@"

@@ -104,9 +104,7 @@ function randInt(min, max) { return Math.floor(min + Math.random() * (max - min 
 // bookkeeping work on hidden/backgrounded tabs, which is irrelevant in a
 // headless server context and otherwise just burns CPU for no benefit here.
 export function puppeteerLaunchArgs(env = process.env) {
-  return [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
+  const args = [
     '--disable-blink-features=AutomationControlled',
     '--no-first-run',
     '--no-default-browser-check',
@@ -120,8 +118,18 @@ export function puppeteerLaunchArgs(env = process.env) {
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
     '--mute-audio',
-    ...(env.ZAI_BROWSER_PUPPETEER_ARGS ? env.ZAI_BROWSER_PUPPETEER_ARGS.split(/\s+/).filter(Boolean) : [])
   ];
+
+  // Sandbox flags: --no-sandbox and --disable-setuid-sandbox are often needed
+  // in Docker, but some Chromium builds complain. Allow override via env.
+  if (env.ZAI_BROWSER_NO_SANDBOX !== '0') {
+    args.unshift('--no-sandbox', '--disable-setuid-sandbox');
+  }
+
+  if (env.ZAI_BROWSER_PUPPETEER_ARGS) {
+    args.push(...env.ZAI_BROWSER_PUPPETEER_ARGS.split(/\s+/).filter(Boolean));
+  }
+  return args;
 }
 
 const DEFAULT_IDLE_CLOSE_MS = 10 * 60 * 1000; // close the idle browser after 10 min of no use

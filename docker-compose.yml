@@ -10,8 +10,15 @@ services:
     # more than the Docker default 64mb of /dev/shm or it will randomly crash.
     shm_size: "1gb"
 
+    # Allow Chromium sandbox to work (alternative to --no-sandbox)
+    cap_add:
+      - SYS_ADMIN
+
     ports:
       - "3364:3364"
+      # VNC for manual captcha solving (enable with ENABLE_VNC=1)
+      - "5900:5900"
+      - "6080:6080"
 
     environment:
       PORT: 3364
@@ -23,6 +30,11 @@ services:
       MOCK_PROVIDER: 0
       PERSIST_ADMIN_ACCOUNTS: 1
       ACCOUNT_COOLDOWN_MS: 60000
+      # VNC settings (uncomment to enable)
+      # ENABLE_VNC: 1
+      # VNC_PASSWORD: your-secure-password
+      # ZAI_BROWSER_HEADLESS: 0  # Run browser in visible mode for VNC (0=visible, 1=headless)
+      # ZAI_BROWSER_NO_SANDBOX: 0  # Set to 0 to disable --no-sandbox flag if Chromium complains
       # How long an idle conversation keeps its provider chat id, and how many
       # turns one chat id may grow to, before the next turn starts fresh.
       # SESSION_TTL_MS: 7200000
