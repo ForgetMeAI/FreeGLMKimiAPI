@@ -474,16 +474,6 @@ export class ZaiBrowserClient {
         await this.humanFillPrompt(page, prompt);
         await page.keyboard.press('Enter');
         this.logger?.info?.('[zai-browser] completeViaUi: prompt submitted, waiting for a response...');
-
-        // Quick check: wait a bit to see if we hit a captcha/login wall
-        await sleep(2000);
-        const pageContent = await page.content().catch(() => '');
-        if (isZaiCaptchaError(pageContent)) {
-          cleanup();
-          const err = new Error('Z.ai UI blocked by captcha/verification wall');
-          this.logger?.error?.(`[zai-browser] completeViaUi: ${err.message}`);
-          throw err;
-        }
       } catch (err) {
         // Submission failed (e.g. textarea never appeared because the page
         // landed on a login/captcha wall instead of the chat UI). Kill the

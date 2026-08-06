@@ -32,9 +32,9 @@ services:
       ACCOUNT_COOLDOWN_MS: 60000
       # VNC settings (uncomment to enable)
       ENABLE_VNC: 1
-      VNC_PASSWORD: vampir
+      VNC_PASSWORD: password
       ZAI_BROWSER_HEADLESS: 0  # Run browser in visible mode for VNC ( 0-visible, 1-hidden )
-      # ZAI_BROWSER_NO_SANDBOX: 0  # Set to 0 to disable --no-sandbox flag if Chromium complains
+      ZAI_BROWSER_NO_SANDBOX: 0  # Set to 0 to disable --no-sandbox flag if Chromium complains
       # How long an idle conversation keeps its provider chat id, and how many
       # turns one chat id may grow to, before the next turn starts fresh.
       # SESSION_TTL_MS: 7200000
@@ -58,7 +58,7 @@ services:
       # KIMI_SCENARIOS: '{}'
       # Z.ai browser fallback (Puppeteer/CloakBrowser). See docs/browser-fallback.md.
       ZAI_BROWSER_ENGINE: cloak
-      ZAI_BROWSER_COMPLETION_TIMEOUT: 120000
+      ZAI_BROWSER_COMPLETION_TIMEOUT: 300000
       ZAI_BROWSER_HEARTBEAT_MS: 15000
       # Close the idle browser after 10 min with zero requests (0 disables):
       ZAI_BROWSER_IDLE_CLOSE_MS: 600000
