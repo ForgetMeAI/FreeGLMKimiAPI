@@ -1,0 +1,19 @@
+{
+  "models": [
+    {
+      "id": "glm-5-search",
+      "provider": "glm",
+      "thinking": false,
+      "webSearch": true,
+      "deepResearch": false,
+      "status": "active",
+      "source": "static",
+      "consecutiveFailures": 0,
+      "firstSeenAt": 1785981783503,
+      "lastSeenAt": 1785981783503,
+      "lastErrorAt": 0,
+      "lastError": "",
+      "retiredAt": 0
+    }
+  ]
+}

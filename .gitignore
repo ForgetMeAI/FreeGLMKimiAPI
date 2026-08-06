@@ -7,3 +7,4 @@ auth.jso
 auth.*.json
 *.log
 .DS_Store
+/data/zai-browser-profile
