@@ -104,6 +104,7 @@ function randInt(min, max) { return Math.floor(min + Math.random() * (max - min 
 // bookkeeping work on hidden/backgrounded tabs, which is irrelevant in a
 // headless server context and otherwise just burns CPU for no benefit here.
 export function puppeteerLaunchArgs(env = process.env) {
+  const isHeadless = parseBrowserHeadless(env) !== false;
   const args = [
     '--disable-blink-features=AutomationControlled',
     '--no-first-run',
@@ -124,6 +125,16 @@ export function puppeteerLaunchArgs(env = process.env) {
   // in Docker, but some Chromium builds complain. Allow override via env.
   if (env.ZAI_BROWSER_NO_SANDBOX !== '0') {
     args.unshift('--no-sandbox', '--disable-setuid-sandbox');
+  }
+
+  // Extra stealth flags for headless mode to avoid detection
+  if (isHeadless) {
+    args.push(
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--enable-features=NetworkService,NetworkServiceInProcess',
+      '--disable-blink-features=AutomationControlled'
+    );
   }
 
   if (env.ZAI_BROWSER_PUPPETEER_ARGS) {
@@ -150,10 +161,14 @@ async function launchCloakContext({ env, profileDir, headless, logger }) {
     width: Number(env.ZAI_BROWSER_WIDTH || env.ZAI_SCREEN_WIDTH || 1365),
     height: Number(env.ZAI_BROWSER_HEIGHT || env.ZAI_SCREEN_HEIGHT || 768)
   };
+  
+  // In headless mode, force humanize to prevent detection
+  const useHumanize = headless === false ? envBool(env, 'ZAI_BROWSER_HUMANIZE', true) : true;
+  
   const context = await launchPersistentContext({
     userDataDir: profileDir,
     headless: headless === false ? false : true,
-    humanize: envBool(env, 'ZAI_BROWSER_HUMANIZE', true),
+    humanize: useHumanize,
     humanPreset: env.ZAI_BROWSER_HUMAN_PRESET || 'careful',
     locale: env.ZAI_BROWSER_LOCALE || env.ZAI_LANGUAGE || 'ru-RU',
     timezone: env.ZAI_BROWSER_TIMEZONE || env.ZAI_TIMEZONE || 'Europe/Samara',

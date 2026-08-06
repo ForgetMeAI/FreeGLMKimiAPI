@@ -60,9 +60,14 @@ services:
       ZAI_BROWSER_ENGINE: cloak
       ZAI_BROWSER_COMPLETION_TIMEOUT: 300000
       ZAI_BROWSER_HEARTBEAT_MS: 15000
+      # Humanize settings (cloakbrowser) - simulate human behavior to avoid detection
+      ZAI_BROWSER_HUMANIZE: 1
+      ZAI_BROWSER_HUMAN_PRESET: careful
+      # Locale/timezone matching your IP (Canada/Toronto)
+      ZAI_TIMEZONE: America/Toronto
+      ZAI_TIMEZONE_OFFSET: "-240"
       # Close the idle browser after 10 min with zero requests (0 disables):
       ZAI_BROWSER_IDLE_CLOSE_MS: 600000
-      # ZAI_BROWSER_PUPPETEER_ARGS: ''
 
     # Optional: keep real tokens out of this file entirely and drop them in a
     # .env next to this compose file instead (same keys as .env.example).
