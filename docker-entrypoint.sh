@@ -21,7 +21,7 @@ if [ -f "$SENTINEL" ] && [ "$(cat "$SENTINEL")" = "$CURRENT_HASH" ]; then
     echo "[entrypoint] node_modules matches sentinel — skipping npm ci"
 else
     echo "[entrypoint] Installing dependencies (first run, or package.json/lock/Node/arch/entrypoint changed)..."
-    npm ci
+    npm install
     echo "$CURRENT_HASH" > "$SENTINEL"
 fi
 

@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    CHROME_PATH=/usr/bin/chromium
+    CHROME_PATH=/usr/bin/chromium \
+    ZAI_BROWSER_ENGINE=cloak
 
 WORKDIR /app
 
