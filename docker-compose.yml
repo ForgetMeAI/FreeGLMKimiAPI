@@ -47,8 +47,8 @@ services:
       # Debugging REASON_CHAT_MESSAGE_NOT_FOUND on Kimi turn 2+ (see .env.example
       # and src/providers/kimi.js for context). Capture real values with
       # `npm run kimi:dump-headers` before setting KIMI_EXTRA_HEADERS.
-      # KIMI_EXTRA_HEADERS: '{}'
-      # DEBUG_KIMI: 1
+      KIMI_EXTRA_HEADERS: '{"connect-protocol-version":"1","x-msh-version":"2.0.0"}'
+      DEBUG_KIMI: 1
       # Auto-discover-and-retire model catalog. See docs/model-lifecycle.md.
       # MODEL_CATALOG_PATH: /app/data/models.json
       MODEL_RETIRE_AFTER_FAILURES: 3

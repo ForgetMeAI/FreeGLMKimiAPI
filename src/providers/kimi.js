@@ -1,7 +1,16 @@
 import { contentToText, preparePrompt } from '../message.js';
 
 const BASE='https://www.kimi.com';
-const HEADERS={ Accept:'*/*','Cache-Control':'no-cache',Pragma:'no-cache',Origin:BASE,'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36','X-Msh-Platform':'web' };
+const HEADERS={ 
+  Accept:'*/*',
+  'Cache-Control':'no-cache',
+  Pragma:'no-cache',
+  Origin:BASE,
+  'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+  'X-Msh-Platform':'web',
+  'Connect-Protocol-Version': '1',
+  'X-Msh-Version': '2.0.0'
+};
 // www.kimi.com (international, Connect-RPC) appears to scope a chat_id/message
 // to a particular session identity. Our JWT carries device_id/region (see
 // jwtPayload below); the x-msh-platform header alone is not enough to prove
@@ -33,6 +42,7 @@ export class KimiProvider {
     this.token=account.token || account.accessToken || account.refreshToken || account.refresh_token;
     if(!this.token) throw new Error('Kimi token missing');
     this.jwt=jwtPayload(this.token);
+    if (DEBUG_KIMI) console.error('[FreeGLMKimiAPI] Kimi JWT payload:', JSON.stringify(this.jwt));
   }
   // Best-effort session-identity headers derived from the JWT, so a chat
   // created on turn 1 is recognized as belonging to the same
@@ -40,11 +50,32 @@ export class KimiProvider {
   // note above HEADERS) — KIMI_EXTRA_HEADERS overrides anything here.
   identityHeaders(){
     const h={};
-    if (this.jwt.device_id) h['X-Msh-Device-Id']=String(this.jwt.device_id);
-    if (this.jwt.region) h['X-Msh-Region']=String(this.jwt.region);
-    if (this.jwt.sub) h['X-Traffic-Id']=String(this.jwt.sub);
-    h['X-Language']=KIMI_LANGUAGE;
-    h['R-Timezone']=KIMI_TIMEZONE;
+    // Try multiple possible header names for each JWT field
+    if (this.jwt.device_id) {
+      h['X-Msh-Device-Id'] = String(this.jwt.device_id);
+      h['x-msh-device-id'] = String(this.jwt.device_id);
+      h['X-Device-Id'] = String(this.jwt.device_id);
+    }
+    if (this.jwt.region) {
+      h['X-Msh-Region'] = String(this.jwt.region);
+      h['x-msh-region'] = String(this.jwt.region);
+      h['X-Region'] = String(this.jwt.region);
+    }
+    if (this.jwt.sub) {
+      h['X-Traffic-Id'] = String(this.jwt.sub);
+      h['x-traffic-id'] = String(this.jwt.sub);
+      h['X-User-Id'] = String(this.jwt.sub);
+    }
+    if (this.jwt.user_id) {
+      h['X-User-Id'] = String(this.jwt.user_id);
+    }
+    if (this.jwt.space_id) {
+      h['X-Msh-Space-Id'] = String(this.jwt.space_id);
+      h['x-msh-space-id'] = String(this.jwt.space_id);
+    }
+    h['X-Language'] = KIMI_LANGUAGE;
+    h['R-Timezone'] = KIMI_TIMEZONE;
+    h['X-Timezone'] = KIMI_TIMEZONE;
     return { ...h, ...KIMI_EXTRA_HEADERS };
   }
   async complete({ messages, modelCfg, tools, session }) {
@@ -54,14 +85,16 @@ export class KimiProvider {
     const payload={ scenario:'SCENARIO_K2D5', tools:modelCfg.webSearch ? [{type:'TOOL_TYPE_SEARCH',search:{}}] : [], message, options:{ thinking: !!modelCfg.thinking } };
     if (session.providerSessionId) payload.chat_id = session.providerSessionId;
     const reqHeaders={...HEADERS,...this.identityHeaders(),Authorization:`Bearer ${this.token}`,'Content-Type':'application/connect+json'};
-    if (DEBUG_KIMI) console.error('[FreeGLMKimiAPI] Kimi request headers:', JSON.stringify(reqHeaders), 'chat_id:', payload.chat_id||'(new)', 'parent_id:', message.parent_id||'(none)');
+    if (DEBUG_KIMI) console.error('[FreeGLMKimiAPI] Kimi request:', JSON.stringify({ chat_id: payload.chat_id||'(new)', parent_id: message.parent_id||'(none)', headers: reqHeaders }));
     const resp=await fetch(`${BASE}/apiv2/kimi.gateway.chat.v1.ChatService/Chat`, { method:'POST', headers:reqHeaders, body:frameJson(payload) });
     if (!resp.ok) throw new Error(`Kimi HTTP ${resp.status}: ${(await resp.text()).slice(0,200)}`);
     const arr=Buffer.from(await resp.arrayBuffer());
     const frames=parseKimiFrames(arr);
+    if (DEBUG_KIMI) console.error('[FreeGLMKimiAPI] Kimi raw frames:', JSON.stringify(frames, null, 2));
     let text='', reasoning='', chatId='', parentId='';
     for (const d of frames) {
-      chatId ||= d.chat_id || d.chatId || d.message?.chat_id || d.message?.chatId || '';
+      // Try multiple possible field names for chat_id
+      chatId ||= d.chat_id || d.chatId || d.message?.chat_id || d.message?.chatId || d.session_id || d.sessionId || d.conversation_id || d.conversationId || d.chat?.id || '';
       // Keep overwriting (not ||=) so the LAST message id seen in the stream
       // wins. If an early frame carries the user turn's own echoed id and a
       // later frame carries the assistant reply's id, we want the latter as
@@ -72,6 +105,7 @@ export class KimiProvider {
       if ((d.op === 'set' || d.op === 'append') || parts.length) text += parts.join('');
       reasoning += d.reasoning_content || d.thinking?.content || '';
     }
+    if (DEBUG_KIMI) console.error('[FreeGLMKimiAPI] Kimi response:', { chatId, parentId, textLength: text.length });
     return { text, reasoning, providerSessionId: chatId, parentMessageId: parentId, prompt };
   }
 }
