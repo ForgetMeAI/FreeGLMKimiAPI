@@ -46,7 +46,7 @@ services:
       # KIMI_SCENARIOS: '{}'
       # Z.ai browser fallback (Puppeteer/CloakBrowser). See docs/browser-fallback.md.
       ZAI_BROWSER_ENGINE: cloak
-      ZAI_BROWSER_COMPLETION_TIMEOUT: 180000
+      ZAI_BROWSER_COMPLETION_TIMEOUT: 120000
       ZAI_BROWSER_HEARTBEAT_MS: 15000
       # Close the idle browser after 10 min with zero requests (0 disables):
       ZAI_BROWSER_IDLE_CLOSE_MS: 600000

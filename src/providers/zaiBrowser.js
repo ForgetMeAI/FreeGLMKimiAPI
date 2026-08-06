@@ -9,6 +9,14 @@ const DEFAULT_CLOAK_PROFILE_DIR = path.join(os.homedir(), '.free-glm-kimi-api', 
 const TRANSIENT_HEADER_RE = /^(accept-encoding|connection|content-length|host|origin|referer|priority)$|^(sec-fetch-|sec-ch-)/i;
 const LOCK_FILES = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
 
+// Global semaphore to serialize browser operations (prevents CPU spikes from concurrent Chromium instances)
+let browserSemaphore = Promise.resolve();
+function withBrowserLock(fn) {
+  const run = browserSemaphore.then(fn, fn);
+  browserSemaphore = run.catch(() => {});
+  return run;
+}
+
 export function isZaiCaptchaError(value) {
   const text = typeof value === 'string' ? value : JSON.stringify(value || '');
   return /captcha|FRONTEND_CAPTCHA_REQUIRED|verify again|verification failed|refresh the page to update the app|人机验证失败|请重新验证|刷新页面以更新应用|aliyun|waf|punish/i.test(text);
@@ -304,36 +312,38 @@ export class ZaiBrowserClient {
   }
 
   async completeRequest(req, { token = '', chatId = '' } = {}) {
-    this.touch();
-    const page = await this.ensurePage(token);
-    const target = chatId ? `${ZAI_BASE}/c/${chatId}` : ZAI_BASE;
-    if (!page.url().startsWith(target)) {
-      this.logger?.info?.(`[zai-browser] home page navigating to ${target}`);
-      await page.goto(target, { waitUntil: 'domcontentloaded', timeout: Number(this.env.ZAI_BROWSER_NAV_TIMEOUT || 60_000) }).catch(() => null);
-    }
-    const payload = {
-      url: req.url,
-      headers: browserSafeHeaders(req.headers),
-      body: req.body
-    };
-    const started = Date.now();
-    const result = await page.evaluate(async (data) => {
-      const response = await fetch(data.url, {
-        method: 'POST',
-        headers: data.headers,
-        body: JSON.stringify(data.body),
-        credentials: 'include'
-      });
-      const raw = await response.text();
-      return {
-        ok: response.ok,
-        status: response.status,
-        contentType: response.headers.get('content-type') || '',
-        raw
+    return withBrowserLock(async () => {
+      this.touch();
+      const page = await this.ensurePage(token);
+      const target = chatId ? `${ZAI_BASE}/c/${chatId}` : ZAI_BASE;
+      if (!page.url().startsWith(target)) {
+        this.logger?.info?.(`[zai-browser] home page navigating to ${target}`);
+        await page.goto(target, { waitUntil: 'domcontentloaded', timeout: Number(this.env.ZAI_BROWSER_NAV_TIMEOUT || 60_000) }).catch(() => null);
+      }
+      const payload = {
+        url: req.url,
+        headers: browserSafeHeaders(req.headers),
+        body: req.body
       };
-    }, payload);
-    this.logger?.info?.(`[zai-browser] in-page fetch completed in ${Date.now() - started}ms (ok=${result.ok}, status=${result.status})`);
-    return result;
+      const started = Date.now();
+      const result = await page.evaluate(async (data) => {
+        const response = await fetch(data.url, {
+          method: 'POST',
+          headers: data.headers,
+          body: JSON.stringify(data.body),
+          credentials: 'include'
+        });
+        const raw = await response.text();
+        return {
+          ok: response.ok,
+          status: response.status,
+          contentType: response.headers.get('content-type') || '',
+          raw
+        };
+      }, payload);
+      this.logger?.info?.(`[zai-browser] in-page fetch completed in ${Date.now() - started}ms (ok=${result.ok}, status=${result.status})`);
+      return result;
+    });
   }
 
   async completeAndParse(req, options = {}) {
@@ -388,19 +398,20 @@ export class ZaiBrowserClient {
   }
 
   async completeViaUi(prompt) {
-    this.touch();
-    // Just makes sure a browser/context exists — this is the persistent
-    // "home" page used by completeRequest()'s lightweight in-page fetch
-    // path, and completeViaUi() must never touch or replace it (see below).
-    await this.ensurePage();
-    const page = await this.openScratchPage();
-    this.logger?.info?.(`[zai-browser] completeViaUi: opened scratch page (${this.openScratchPages.size} open)`);
+    return withBrowserLock(async () => {
+      this.touch();
+      // Just makes sure a browser/context exists — this is the persistent
+      // "home" page used by completeRequest()'s lightweight in-page fetch
+      // path, and completeViaUi() must never touch or replace it (see below).
+      await this.ensurePage();
+      const page = await this.openScratchPage();
+      this.logger?.info?.(`[zai-browser] completeViaUi: opened scratch page (${this.openScratchPages.size} open)`);
 
-    try {
-      await this.setupPage(page);
-      const navStarted = Date.now();
-      await page.goto(ZAI_BASE, { waitUntil: 'domcontentloaded', timeout: Number(this.env.ZAI_BROWSER_NAV_TIMEOUT || 60_000) }).catch(() => null);
-      this.logger?.info?.(`[zai-browser] completeViaUi: navigated to ${ZAI_BASE} in ${Date.now() - navStarted}ms`);
+      try {
+        await this.setupPage(page);
+        const navStarted = Date.now();
+        await page.goto(ZAI_BASE, { waitUntil: 'domcontentloaded', timeout: Number(this.env.ZAI_BROWSER_NAV_TIMEOUT || 60_000) }).catch(() => null);
+        this.logger?.info?.(`[zai-browser] completeViaUi: navigated to ${ZAI_BASE} in ${Date.now() - navStarted}ms`);
 
       // Tracked outside the Promise executor so a failure during prompt
       // submission (below) can tear down the timer/listener instead of
@@ -416,7 +427,7 @@ export class ZaiBrowserClient {
         if (onResponse) page.off('response', onResponse);
       };
 
-      const completionTimeoutMs = Number(this.env.ZAI_BROWSER_COMPLETION_TIMEOUT || 180_000);
+      const completionTimeoutMs = Number(this.env.ZAI_BROWSER_COMPLETION_TIMEOUT || 120_000);
       const heartbeatMs = Number(this.env.ZAI_BROWSER_HEARTBEAT_MS || 15_000);
       const waitStarted = Date.now();
       const responsePromise = new Promise((resolve, reject) => {
@@ -455,6 +466,16 @@ export class ZaiBrowserClient {
         await this.humanFillPrompt(page, prompt);
         await page.keyboard.press('Enter');
         this.logger?.info?.('[zai-browser] completeViaUi: prompt submitted, waiting for a response...');
+
+        // Quick check: wait a bit to see if we hit a captcha/login wall
+        await sleep(2000);
+        const pageContent = await page.content().catch(() => '');
+        if (isZaiCaptchaError(pageContent)) {
+          cleanup();
+          const err = new Error('Z.ai UI blocked by captcha/verification wall');
+          this.logger?.error?.(`[zai-browser] completeViaUi: ${err.message}`);
+          throw err;
+        }
       } catch (err) {
         // Submission failed (e.g. textarea never appeared because the page
         // landed on a login/captcha wall instead of the chat UI). Kill the
@@ -478,6 +499,7 @@ export class ZaiBrowserClient {
       await this.closeScratchPage(page);
       this.logger?.info?.(`[zai-browser] completeViaUi: closed scratch page (${this.openScratchPages.size} still open)`);
     }
+  });
   }
 
   async close() {
