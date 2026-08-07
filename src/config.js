@@ -65,7 +65,9 @@ export const MODELS = {
 };
 
 export function resolveModel(model = DEFAULT_MODEL) {
-  const id = String(model || DEFAULT_MODEL);
+  let id = String(model || DEFAULT_MODEL);
+  // Strip known gateway prefixes (e.g., "glmkimi-free/")
+  id = id.replace(/^glmkimi-free\//i, '');
   if (MODELS[id]) return { id, ...MODELS[id] };
   if (id.toLowerCase().startsWith('glm')) return { id, provider: 'glm', thinking: /think|zero|reason/i.test(id), webSearch: /search|web/i.test(id), deepResearch: /research/i.test(id) };
   if (id.toLowerCase().startsWith('kimi')) return { id, provider: 'kimi', thinking: /think|r1|reason/i.test(id), webSearch: /search|web/i.test(id) };
