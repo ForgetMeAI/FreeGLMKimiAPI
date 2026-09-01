@@ -87,7 +87,17 @@ export class KimiProvider {
     const reqHeaders={...HEADERS,...this.identityHeaders(),Authorization:`Bearer ${this.token}`,'Content-Type':'application/connect+json'};
     if (DEBUG_KIMI) console.error('[FreeGLMKimiAPI] Kimi request:', JSON.stringify({ chat_id: payload.chat_id||'(new)', parent_id: message.parent_id||'(none)', headers: reqHeaders }));
     const resp=await fetch(`${BASE}/apiv2/kimi.gateway.chat.v1.ChatService/Chat`, { method:'POST', headers:reqHeaders, body:frameJson(payload) });
-    if (!resp.ok) throw new Error(`Kimi HTTP ${resp.status}: ${(await resp.text()).slice(0,200)}`);
+    if (!resp.ok) {
+      const errText = (await resp.text()).slice(0,500);
+      const err = new Error(`Kimi HTTP ${resp.status}: ${errText}`);
+      err.status = resp.status;
+      err.body = errText;
+      // Detect token expiry so account manager can rotate to another account
+      if (resp.status === 401 && /token is expired|invalid user token|unauthenticated/i.test(errText)) {
+        err.code = 'TOKEN_EXPIRED';
+      }
+      throw err;
+    }
     const arr=Buffer.from(await resp.arrayBuffer());
     const frames=parseKimiFrames(arr);
     if (DEBUG_KIMI) console.error('[FreeGLMKimiAPI] Kimi raw frames:', JSON.stringify(frames, null, 2));

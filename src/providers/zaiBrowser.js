@@ -105,6 +105,7 @@ function randInt(min, max) { return Math.floor(min + Math.random() * (max - min 
 // headless server context and otherwise just burns CPU for no benefit here.
 export function puppeteerLaunchArgs(env = process.env) {
   const isHeadless = parseBrowserHeadless(env) !== false;
+  const isRoot = process.getuid?.() === 0;
   const args = [
     '--disable-blink-features=AutomationControlled',
     '--no-first-run',
@@ -121,9 +122,11 @@ export function puppeteerLaunchArgs(env = process.env) {
     '--mute-audio',
   ];
 
-  // Sandbox flags: --no-sandbox and --disable-setuid-sandbox are often needed
-  // in Docker, but some Chromium builds complain. Allow override via env.
-  if (env.ZAI_BROWSER_NO_SANDBOX !== '0') {
+  // Sandbox flags: --no-sandbox and --disable-setuid-sandbox are required
+  // when running as root in Docker. Always enable when running as root,
+  // allow override via ZAI_BROWSER_NO_SANDBOX=0 to disable.
+  const forceNoSandbox = isRoot || env.ZAI_BROWSER_NO_SANDBOX !== '0';
+  if (forceNoSandbox) {
     args.unshift('--no-sandbox', '--disable-setuid-sandbox');
   }
 
@@ -248,14 +251,27 @@ export class ZaiBrowserClient {
   async launchPuppeteer(headless) {
     const puppeteer = await loadPuppeteer();
     const started = Date.now();
-    this.browser = await puppeteer.launch({
-      headless,
-      executablePath: defaultChromeExecutable(),
-      userDataDir: this.profileDir,
-      defaultViewport: { width: 1365, height: 768, deviceScaleFactor: 1 },
-      ignoreDefaultArgs: ['--enable-automation'],
-      args: puppeteerLaunchArgs(this.env)
-    });
+    const launchArgs = puppeteerLaunchArgs(this.env);
+    this.logger?.info?.(`[zai-browser] launch args: ${launchArgs.join(' ')}`);
+    try {
+      this.browser = await puppeteer.launch({
+        headless,
+        executablePath: defaultChromeExecutable(),
+        userDataDir: this.profileDir,
+        defaultViewport: { width: 1365, height: 768, deviceScaleFactor: 1 },
+        ignoreDefaultArgs: ['--enable-automation'],
+        args: launchArgs
+      });
+    } catch (err) {
+      const msg = err?.message || String(err);
+      // Provide actionable guidance for the common root-in-Docker failure
+      if (msg.includes('Running as root without --no-sandbox')) {
+        this.logger?.error?.('[zai-browser] Chromium sandbox error: running as root requires --no-sandbox. ' +
+          'Ensure ZAI_BROWSER_NO_SANDBOX is not set to "0". ' +
+          'In Docker, run with --cap-add=SYS_ADMIN or use a non-root user.');
+      }
+      throw err;
+    }
     this.logger?.info?.(`[zai-browser] launched puppeteer-extra Chromium in ${Date.now() - started}ms (headless=${headless})`);
     const pages = await this.browser.pages();
     this.page = pages[0] || await this.browser.newPage();
@@ -270,18 +286,31 @@ export class ZaiBrowserClient {
     const headless = parseBrowserHeadless(this.env);
     this.logger?.info?.(`[zai-browser] no live page — launching (engine=${this.engine}, headless=${headless})`);
 
+    // In containers without display, force headless unless explicitly opted out
+    // ZAI_BROWSER_FORCE_HEADLESS=0 to disable this auto-detection
+    const forceHeadless = process.env.ZAI_BROWSER_FORCE_HEADLESS !== '0' && (!process.env.DISPLAY || process.env.FORCE_HEADLESS === '1');
+    const effectiveHeadless = forceHeadless ? 'new' : headless;
+    if (forceHeadless && headless !== 'new') {
+      this.logger?.info?.('[zai-browser] no DISPLAY detected, forcing headless=new');
+    }
+
     if (this.engine === 'cloak') {
       try {
-        this.context = await launchCloakContext({ env: this.env, profileDir: this.profileDir, headless, logger: this.logger });
+        const launchTimeoutMs = Number(this.env.ZAI_BROWSER_LAUNCH_TIMEOUT || 90_000);
+        this.logger?.info?.(`[zai-browser] launching CloakBrowser (timeout: ${launchTimeoutMs}ms)`);
+        this.context = await Promise.race([
+          launchCloakContext({ env: this.env, profileDir: this.profileDir, headless: effectiveHeadless, logger: this.logger }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`CloakBrowser launch timeout after ${launchTimeoutMs}ms`)), launchTimeoutMs))
+        ]);
         const pages = this.context.pages();
         this.page = pages[0] || await this.context.newPage();
       } catch (err) {
         this.logger?.warn?.(`[zai-browser] CloakBrowser unavailable/failed, falling back to puppeteer-extra: ${err?.message || err}`);
         this.engine = 'puppeteer';
-        await this.launchPuppeteer(headless);
+        await this.launchPuppeteer(effectiveHeadless);
       }
     } else {
-      await this.launchPuppeteer(headless);
+      await this.launchPuppeteer(effectiveHeadless);
     }
     this.launchedAt = Date.now();
 
@@ -433,7 +462,14 @@ export class ZaiBrowserClient {
       try {
         await this.setupPage(page);
         const navStarted = Date.now();
-        await page.goto(ZAI_BASE, { waitUntil: 'domcontentloaded', timeout: Number(this.env.ZAI_BROWSER_NAV_TIMEOUT || 60_000) }).catch(() => null);
+        const navTimeoutMs = Number(this.env.ZAI_BROWSER_NAV_TIMEOUT || 60_000);
+        this.logger?.info?.(`[zai-browser] completeViaUi: navigating to ${ZAI_BASE} (timeout: ${navTimeoutMs}ms)`);
+        try {
+          await page.goto(ZAI_BASE, { waitUntil: 'domcontentloaded', timeout: navTimeoutMs });
+        } catch (navErr) {
+          this.logger?.warn?.(`[zai-browser] completeViaUi: navigation failed: ${navErr?.message || navErr}`);
+          throw new Error(`Navigation to ${ZAI_BASE} failed: ${navErr?.message || navErr}`);
+        }
         this.logger?.info?.(`[zai-browser] completeViaUi: navigated to ${ZAI_BASE} in ${Date.now() - navStarted}ms`);
 
       // Tracked outside the Promise executor so a failure during prompt
@@ -450,8 +486,10 @@ export class ZaiBrowserClient {
         if (onResponse) page.off('response', onResponse);
       };
 
-      const completionTimeoutMs = Number(this.env.ZAI_BROWSER_COMPLETION_TIMEOUT || 120_000);
+      // Default 60s completion timeout (was 120s) - overridable via env
+      const completionTimeoutMs = Number(this.env.ZAI_BROWSER_COMPLETION_TIMEOUT || 60_000);
       const heartbeatMs = Number(this.env.ZAI_BROWSER_HEARTBEAT_MS || 15_000);
+      this.logger?.info?.(`[zai-browser] completeViaUi: completion timeout set to ${completionTimeoutMs}ms`);
       const waitStarted = Date.now();
       const responsePromise = new Promise((resolve, reject) => {
         timeout = setTimeout(() => {
