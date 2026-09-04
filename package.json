@@ -16,7 +16,8 @@
     "doctor": "node scripts/doctor.js",
     "smoke:zai": "node scripts/zai_real_smoke.js",
     "auth:from-curl": "node scripts/import_zai_curl.js",
-    "auth:browser": "node scripts/zai_browser_auth.js"
+    "auth:browser": "node scripts/zai_browser_auth.js",
+    "kimi:dump-headers": "node scripts/kimi_dump_curl_headers.js"
   },
   "keywords": [
     "glm",
@@ -31,8 +32,12 @@
     "cloakbrowser": "^0.3.31",
     "eventsource-parser": "^3.0.6",
     "playwright-core": "^1.60.0",
+    "puppeteer": "^25.5.0",
     "puppeteer-core": "^25.1.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "overrides": {
+    "rimraf": "^4.0.0"
   }
 }

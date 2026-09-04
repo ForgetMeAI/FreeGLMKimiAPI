@@ -90,7 +90,7 @@ export function parseZaiSse(raw) {
   return { text, reasoning, parentMessageId, providerSessionId };
 }
 
-export function buildZaiRequest({ token, model='glm-5', prompt='', chatId='', parentMessageId=null, thinking=false, webSearch=false, captchaVerifyParam=null, cookie=null, now=()=>Date.now(), uuid=randomUuid } = {}) {
+export function buildZaiRequest({ token, model='glm-5', prompt='', chatId='', parentMessageId=null, thinking=false, webSearch=false, deepResearch=false, captchaVerifyParam=null, cookie=null, now=()=>Date.now(), uuid=randomUuid } = {}) {
   const timestamp = now();
   const requestId = uuid();
   const messageId = uuid();
@@ -112,7 +112,7 @@ export function buildZaiRequest({ token, model='glm-5', prompt='', chatId='', pa
     signature_prompt: prompt,
     params: {},
     extra: {},
-    features: { image_generation: false, web_search: !!webSearch, auto_web_search: false, preview_mode: true, flags: [], vlm_tools_enable: false, vlm_web_search_enable: false, vlm_website_mode: false, enable_thinking: !!thinking },
+    features: { image_generation: false, web_search: !!webSearch, deep_research: !!deepResearch, auto_web_search: false, preview_mode: true, flags: [], vlm_tools_enable: false, vlm_web_search_enable: false, vlm_website_mode: false, enable_thinking: !!thinking },
     variables: {
       '{{USER_NAME}}': process.env.ZAI_USER_NAME || 'test', '{{USER_LOCATION}}':'Unknown', '{{CURRENT_DATETIME}}':localTime.toISOString().replace('T',' ').substring(0,19),
       '{{CURRENT_DATE}}':localTime.toISOString().substring(0,10), '{{CURRENT_TIME}}':localTime.toISOString().substring(11,19), '{{CURRENT_WEEKDAY}}':['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][localTime.getDay()], '{{CURRENT_TIMEZONE}}':ZAI_TIMEZONE, '{{USER_LANGUAGE}}':'en-US'
@@ -154,7 +154,7 @@ export class ZaiProvider {
       chatId = created.chatId;
       parentId = created.messageId;
     }
-    const req = buildZaiRequest({ token:this.token, model:modelCfg.id, prompt, chatId, parentMessageId:parentId, thinking:modelCfg.thinking, webSearch:modelCfg.webSearch, captchaVerifyParam:this.captchaVerifyParam, cookie:this.cookie });
+    const req = buildZaiRequest({ token:this.token, model:modelCfg.id, prompt, chatId, parentMessageId:parentId, thinking:modelCfg.thinking, webSearch:modelCfg.webSearch, deepResearch:modelCfg.deepResearch, captchaVerifyParam:this.captchaVerifyParam, cookie:this.cookie });
     const resp = await fetch(req.url, { method:'POST', headers:req.headers, body:JSON.stringify(req.body) });
     const raw = await resp.text();
     if (!resp.ok) {

@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { pathToFileURL } from 'url';
 import { defaultChromeExecutable } from '../src/providers/zaiBrowser.js';
 
 const outPath = process.argv[2] || process.env.AUTH_PATH || './auth.json';
@@ -65,6 +66,11 @@ async function cookieHeader(page) {
   return cookies.map(c => `${c.name}=${c.value}`).join('; ');
 }
 
+function isTransientNavigationError(err) {
+  const msg = String(err && err.message || err || '');
+  return /Execution context was destroyed|Cannot find context|Target closed|Session closed|detached Frame|Node is detached/i.test(msg);
+}
+
 async function main() {
   const puppeteer = await loadPuppeteer();
   fs.mkdirSync(profileDir, { recursive: true });
@@ -96,7 +102,17 @@ async function main() {
   while (Date.now() - started < timeoutMs) {
     // Prefer localStorage: Z.ai may keep an early guest Authorization request in memory,
     // while localStorage is already updated to the real logged-in account token.
-    const localToken = await readToken(page);
+    let localToken = '';
+    try {
+      localToken = await readToken(page);
+    } catch (err) {
+      if (isTransientNavigationError(err)) {
+        // Page navigated (e.g. right after login) mid-read; just retry next tick.
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+      throw err;
+    }
     const candidates = [localToken, networkToken].filter(Boolean);
     const usable = candidates.map(token => ({ token, state: isUsableZaiAuthToken(token, { allowGuest: allowGuestAuth }) })).find(item => item.state.ok);
     const guestSeen = candidates.some(token => isUsableZaiAuthToken(token, { allowGuest: false }).reason === 'guest_token');
@@ -117,6 +133,14 @@ async function main() {
   process.exit(2);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
   main().catch(err => { console.error(err); process.exit(1); });
+} else if (process.env.ZAI_AUTH_DEBUG_ENTRY) {
+  // Diagnostic: set ZAI_AUTH_DEBUG_ENTRY=1 to see why the entry-point check didn't match
+  console.error('zai_browser_auth.js loaded but not run as main:', {
+    'import.meta.url': import.meta.url,
+    'argv[1]': process.argv[1],
+    'expected': process.argv[1] ? pathToFileURL(process.argv[1]).href : null
+  });
 }

@@ -1,0 +1,86 @@
+services:
+  freeglmkimi:
+    build:
+      context: ./repo       # cloned ForgetMeAI/FreeGLMKimiAPI; Dockerfile + docker-entrypoint.sh live here too
+      dockerfile: Dockerfile
+    container_name: freeglmkimi
+    restart: unless-stopped
+
+    # Headless Chromium (Z.ai browser-fallback login / anti-bot handling) needs
+    # more than the Docker default 64mb of /dev/shm or it will randomly crash.
+    shm_size: "1gb"
+
+    # Allow Chromium sandbox to work (alternative to --no-sandbox)
+    cap_add:
+      - SYS_ADMIN
+
+    ports:
+      - "3364:3364"
+      # VNC for manual captcha solving (enable with ENABLE_VNC=1)
+      - "3365:5900"
+      - "3366:6080"
+
+    environment:
+      PORT: 3364
+      HOST: 0.0.0.0
+      DEFAULT_PROVIDER: kimi
+      DEFAULT_MODEL: kimi-k2.5
+      GLM_BACKEND: zai
+      AUTH_PATH: /app/data/auth.json
+      MOCK_PROVIDER: 0
+      PERSIST_ADMIN_ACCOUNTS: 1
+      ACCOUNT_COOLDOWN_MS: 60000
+      # VNC settings (uncomment to enable)
+      ENABLE_VNC: 1
+      VNC_PASSWORD: password
+      ZAI_BROWSER_HEADLESS: 0  # Run browser in visible mode for VNC ( 0-visible, 1-hidden )
+      ZAI_BROWSER_NO_SANDBOX: 0  # Set to 0 to disable --no-sandbox flag if Chromium complains
+      # How long an idle conversation keeps its provider chat id, and how many
+      # turns one chat id may grow to, before the next turn starts fresh.
+      # SESSION_TTL_MS: 7200000
+      # SESSION_MAX_DEPTH: 100
+      # Single-account shortcut (skip if you're using auth.json instead):
+      # GLM_TOKEN: ""
+      # KIMI_TOKEN: ""
+      # Protect the proxy if you expose it beyond localhost/LAN:
+      # API_KEYS: ""
+      # Debugging REASON_CHAT_MESSAGE_NOT_FOUND on Kimi turn 2+ (see .env.example
+      # and src/providers/kimi.js for context). Capture real values with
+      # `npm run kimi:dump-headers` before setting KIMI_EXTRA_HEADERS.
+      KIMI_EXTRA_HEADERS: '{"connect-protocol-version":"1","x-msh-version":"2.0.0"}'
+      DEBUG_KIMI: 1
+      # Auto-discover-and-retire model catalog. See docs/model-lifecycle.md.
+      # MODEL_CATALOG_PATH: /app/data/models.json
+      MODEL_RETIRE_AFTER_FAILURES: 3
+      # MODEL_ERROR_PATTERNS_EXTRA: '[]'
+      # Kimi only — unconfirmed guesses for K2.6/K2.7-Code/K3, see
+      # scripts/kimi_dump_curl_headers.js:
+      # KIMI_SCENARIOS: '{}'
+      # Z.ai browser fallback (Puppeteer/CloakBrowser). See docs/browser-fallback.md.
+      ZAI_BROWSER_ENGINE: cloak
+      ZAI_BROWSER_COMPLETION_TIMEOUT: 300000
+      ZAI_BROWSER_HEARTBEAT_MS: 15000
+      # Humanize settings (cloakbrowser) - simulate human behavior to avoid detection
+      ZAI_BROWSER_HUMANIZE: 1
+      ZAI_BROWSER_HUMAN_PRESET: careful
+      # Locale/timezone matching your IP (Canada/Toronto)
+      ZAI_TIMEZONE: America/Toronto
+      ZAI_TIMEZONE_OFFSET: "-240"
+      # Close the idle browser after 10 min with zero requests (0 disables):
+      ZAI_BROWSER_IDLE_CLOSE_MS: 600000
+
+    # Optional: keep real tokens out of this file entirely and drop them in a
+    # .env next to this compose file instead (same keys as .env.example).
+    # env_file:
+    #   - .env
+
+    volumes:
+      # Persists auth.json, the admin-added account pool, and the Z.ai browser
+      # profile across container rebuilds/restarts.
+      - /volume1/docker/freeglmkimi/data:/app/data
+      # Persists node_modules across restarts/NAS reboots. The entrypoint's
+      # sentinel check means `npm ci` only reruns when package.json/lock (or
+      # Node version/arch) actually changes — a plain restart or reboot skips
+      # straight to `node src/server.js`. First start after creating this
+      # volume will still install once, as normal.
+      - /volume1/docker/freeglmkimi/node_modules:/app/node_modules

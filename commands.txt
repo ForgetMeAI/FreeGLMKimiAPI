@@ -1,0 +1,14 @@
+
+sudo docker compose build --no-cache
+sudo docker compose up -d
+
+curl http://192.168.31.66:3364/health
+
+curl -X POST http://192.168.31.66:3364/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kimi-k2.5",
+    "messages": [{"role": "user", "content": "hello"}],
+    "stream": false
+  }'
+
