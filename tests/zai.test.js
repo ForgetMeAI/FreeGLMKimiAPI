@@ -148,7 +148,7 @@ test('Z.ai browser fallback supports CloakBrowser engine settings and profile lo
   assert.equal(fs.existsSync(path.join(dir, 'SingletonLock')), false);
   fs.mkdirSync(path.join(dir, 'Default'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'Default', 'LOCK'), 'stale');
-  assert.deepEqual(cleanChromeProfileLocks(dir), ['Default/LOCK']);
+  assert.deepEqual(cleanChromeProfileLocks(dir),[path.join('Default', 'LOCK')]);
   assert.equal(fs.existsSync(path.join(dir, 'Default', 'LOCK')), false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
