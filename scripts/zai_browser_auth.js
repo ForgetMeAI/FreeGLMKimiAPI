@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { pathToFileURL } from 'url';
 import { defaultChromeExecutable } from '../src/providers/zaiBrowser.js';
 
 const outPath = process.argv[2] || process.env.AUTH_PATH || './auth.json';
@@ -117,6 +118,9 @@ async function main() {
   process.exit(2);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(err => { console.error(err); process.exit(1); });
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+    main().catch(err => {
+        console.error(err);
+        process.exit(1);
+    });
 }
